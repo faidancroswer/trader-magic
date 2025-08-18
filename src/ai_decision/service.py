@@ -2,6 +2,7 @@ import asyncio
 import re
 import time
 import threading
+import sys
 from typing import Optional, Dict
 from datetime import datetime
 
@@ -12,10 +13,8 @@ from src.config.settings import config
 
 logger = get_logger("ai_decision_service")
 
-# Import version from setup.py
-import sys
-sys.path.insert(0, '..')
-from setup import VERSION
+# Version info
+VERSION = "1.0.0"
 
 if len(sys.argv) > 1 and sys.argv[1] == '--license':
     print(f"TraderMagic v{VERSION} - Licensed under AGPL-3.0")

@@ -11,7 +11,7 @@ for i in $(seq 1 30); do
   if curl -s http://ollama:11434/api/version > /dev/null 2>&1; then
     echo "Ollama server is ready!"
     echo "Pulling model: $MODEL"
-    curl -X POST http://ollama:11434/api/pull -d "{\"name\":\"$MODEL\"}"
+    curl -X POST http://ollama:11434/api/pull -H "Content-Type: application/json" -d "{\"name\":\"$MODEL\"}"
     echo "Model pull initiated. This may take some time to complete."
     exit 0
   fi

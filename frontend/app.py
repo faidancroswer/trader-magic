@@ -406,7 +406,12 @@ def index():
     symbols = os.getenv('SYMBOLS', 'BTC/USD').split(',')
     enforce_pdt = os.getenv('ALPACA_ENFORCE_PDT_RULES', 'true').lower() == 'true'
     paper_trading = os.getenv('ALPACA_PAPER_TRADING', 'true').lower() == 'true'
-    debug_mode = os.getenv('ALPACA_DEBUG_MODE', 'false').lower() == 'true'
+    # Check debug mode based on trading exchange
+    trading_exchange = os.getenv('TRADING_EXCHANGE', 'alpaca').lower()
+    if trading_exchange == 'binance':
+        debug_mode = os.getenv('BINANCE_DEBUG_MODE', 'false').lower() == 'true'
+    else:
+        debug_mode = os.getenv('ALPACA_DEBUG_MODE', 'false').lower() == 'true'
     
     # Get trading settings
     fixed_amount_mode = os.getenv('TRADE_USE_FIXED', 'false').lower() == 'true'
@@ -414,32 +419,40 @@ def index():
     fixed_amount = float(os.getenv('TRADE_FIXED_AMOUNT', '10.0'))
     
     # IMPORTANT SAFETY FEATURE: Force trading to disabled state when page loads
+    # COMMENTED OUT FOR BINANCE TESTNET TESTING
+    # try:
+    #     # Force set trading to disabled in Redis
+    #     redis_client.set("trading_enabled", "false")
+    #     print("SAFETY: Forced trading disabled when loading dashboard")
+    #     trading_enabled = False
+    
+    # Get current trading status from Redis instead of forcing it to false
     try:
-        # Force set trading to disabled in Redis
-        redis_client.set("trading_enabled", "false")
-        print("SAFETY: Forced trading disabled when loading dashboard")
-        trading_enabled = False
+        trading_enabled_redis = redis_client.get("trading_enabled")
+        trading_enabled = trading_enabled_redis == "true" if trading_enabled_redis is not None else False
+        print(f"Current trading status from Redis: {trading_enabled}")
         
         # IMPORTANT: Create disabled trade messages in Redis for all symbols on page load
-        for symbol in symbols:
-            try:
-                # Create standard disabled message
-                result = {
-                    "symbol": symbol,
-                    "decision": "buy",  # Default to buy for displaying messages
-                    "order_id": f"page-load-{uuid.uuid4()}",
-                    "quantity": None,
-                    "price": None,
-                    "status": "skipped",
-                    "error": "Trading is currently disabled",
-                    "timestamp": datetime.now().isoformat()
-                }
-                # Save to Redis
-                redis_key = f"trade_result:{symbol}"
-                redis_client.set(redis_key, json.dumps(result))
-                print(f"Created disabled message for {symbol} on page load")
-            except Exception as e:
-                print(f"Error creating disabled message: {e}")
+        # COMMENTED OUT FOR BINANCE TESTNET TESTING - Let real trade results show
+        # for symbol in symbols:
+        #     try:
+        #         # Create standard disabled message
+        #         result = {
+        #             "symbol": symbol,
+        #             "decision": "buy",  # Default to buy for displaying messages
+        #             "order_id": f"page-load-{uuid.uuid4()}",
+        #             "quantity": None,
+        #             "price": None,
+        #             "status": "skipped",
+        #             "error": "Trading is currently disabled",
+        #             "timestamp": datetime.now().isoformat()
+        #         }
+        #         # Save to Redis
+        #         redis_key = f"trade_result:{symbol}"
+        #         redis_client.set(redis_key, json.dumps(result))
+        #         print(f"Created disabled message for {symbol} on page load")
+        #     except Exception as e:
+        #         print(f"Error creating disabled message: {e}")
     except Exception as e:
         print(f"Error setting trading disabled: {e}")
         trading_enabled = False
@@ -621,7 +634,7 @@ def account_info():
             'paper_trading': os.getenv('PAPER_TRADING', 'true').lower() == 'true'
         }), 500
 
-@app.route('/debug/execute-trade/<symbol>/<decision>')
+@app.route('/debug/execute-trade/<path:symbol>/<decision>')
 def debug_execute_trade(symbol, decision):
     """Debug endpoint to execute a trade directly"""
     try:

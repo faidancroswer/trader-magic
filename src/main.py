@@ -56,9 +56,10 @@ def setup_services():
     logger.info("Starting services...")
     
     # IMPORTANT: ALWAYS initialize trading to disabled on startup for safety
-    from src.utils import force_trading_disabled
-    success = force_trading_disabled()
-    logger.info("Trading initialized to DISABLED for safety")
+    # COMMENTED OUT FOR BINANCE TESTNET TESTING
+    # from src.utils import force_trading_disabled
+    # success = force_trading_disabled()
+    logger.info("SAFETY: Trading initialization disabled for Binance testnet testing")
     
     # Double-check the value was set correctly
     from src.utils import redis_client

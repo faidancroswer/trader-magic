@@ -16,14 +16,18 @@ class DateTimeEncoder(json.JSONEncoder):
 
 class RedisClient:
     def __init__(self):
-        self.client = redis.Redis(
-            host=config.redis.host,
-            port=config.redis.port,
-            db=config.redis.db,
-            decode_responses=True
-        )
+        self.client = None
+        self.connected = False
+        
         try:
+            self.client = redis.Redis(
+                host=config.redis.host,
+                port=config.redis.port,
+                db=config.redis.db,
+                decode_responses=True
+            )
             self.client.ping()
+            self.connected = True
             logger.info("Connected to Redis")
             
             # Enable keyspace notifications for all events
@@ -33,12 +37,17 @@ class RedisClient:
             except Exception as e:
                 logger.warning(f"Failed to enable Redis keyspace notifications: {e}")
                 
-        except redis.ConnectionError:
+        except Exception as e:
             logger.error("Failed to connect to Redis")
-            raise
+            logger.warning("Continuing without Redis - some features may be limited")
+            self.client = None
+            self.connected = False
     
     def scan_iter(self, match=None):
         """Return an iterator of keys matching the given pattern"""
+        if not self.connected or not self.client:
+            return []
+            
         try:
             for key in self.client.scan_iter(match=match):
                 yield key
@@ -50,6 +59,9 @@ class RedisClient:
         """
         Get a string value from Redis
         """
+        if not self.connected or not self.client:
+            return None
+            
         try:
             return self.client.get(key)
         except Exception as e:
@@ -60,6 +72,9 @@ class RedisClient:
         """
         Set a string value in Redis
         """
+        if not self.connected or not self.client:
+            return False
+            
         try:
             result = self.client.set(key, value)
             if ttl:
@@ -73,6 +88,9 @@ class RedisClient:
         """
         Store JSON data in Redis
         """
+        if not self.connected or not self.client:
+            return False
+            
         try:
             # Use the custom encoder to handle datetime objects
             serialized = json.dumps(data, cls=DateTimeEncoder)
@@ -88,6 +106,9 @@ class RedisClient:
         """
         Retrieve JSON data from Redis
         """
+        if not self.connected or not self.client:
+            return None
+            
         try:
             data = self.client.get(key)
             if data:

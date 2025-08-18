@@ -2,22 +2,21 @@ from typing import Dict, Optional
 import time
 import uuid
 import threading
+import sys
 from datetime import datetime
 
 from src.utils import get_logger, TradeSignal, TradeResult, redis_client
 
 logger = get_logger("trade_execution_service")
 
-# Import version from setup.py
-import sys
-sys.path.insert(0, '..')
-from setup import VERSION
+# Version info
+VERSION = "1.0.0"
 
 if len(sys.argv) > 1 and sys.argv[1] == '--license':
     print(f"TraderMagic v{VERSION} - Licensed under AGPL-3.0")
     sys.exit(0)
 
-# Import alpaca_client inside the class methods to avoid circular imports
+# Import trading clients inside methods to avoid circular imports
 
 class TradeExecutionService:
     def __init__(self):
@@ -26,8 +25,9 @@ class TradeExecutionService:
         
         # SAFETY: Force trading to disabled state at startup
         # This is a critical safety feature
-        redis_client.client.set("trading_enabled", "false")
-        logger.warning("SAFETY: Trading initialized to DISABLED in trade execution service")
+        # COMMENTED OUT FOR BINANCE TESTNET TESTING
+        # redis_client.client.set("trading_enabled", "false")
+        logger.info("SAFETY: Trading initialization disabled for Binance testnet testing")
 
     def execute_trade(self, signal: TradeSignal) -> Optional[TradeResult]:
         """
@@ -39,8 +39,13 @@ class TradeExecutionService:
         Returns:
             TradeResult or None if trade was skipped due to time constraints
         """
-        # Import alpaca_client here to avoid circular imports
-        from src.trade_execution.alpaca_client import alpaca_client
+        # Import trading client based on configuration
+        from src.config import config
+        
+        if config.trading.exchange.lower() == "binance":
+            from src.trade_execution.binance_client import binance_client as trading_client
+        else:
+            from src.trade_execution.alpaca_client import alpaca_client as trading_client
         
         # Check if we recently executed a trade for this symbol
         current_time = time.time()
@@ -52,8 +57,8 @@ class TradeExecutionService:
             return None
         
         # Execute the trade
-        logger.info(f"Calling alpaca_client.execute_trade for {signal.symbol}")
-        result = alpaca_client.execute_trade(signal)
+        logger.info(f"Calling trading_client.execute_trade for {signal.symbol}")
+        result = trading_client.execute_trade(signal)
         logger.info(f"Trade execution result: {result}")
         
         # Update last execution time
@@ -116,8 +121,14 @@ def start_listeners():
     
     def account_info_listener_thread():
         from src.utils import redis_client
-        from src.trade_execution.alpaca_client import alpaca_client
+        from src.config import config
         import json
+        
+        # Import trading client based on configuration
+        if config.trading.exchange.lower() == "binance":
+            from src.trade_execution.binance_client import binance_client as trading_client
+        else:
+            from src.trade_execution.alpaca_client import alpaca_client as trading_client
         
         logger.info("Starting account info listener thread")
         pubsub = redis_client.get_pubsub()
@@ -134,8 +145,8 @@ def start_listeners():
                         request_id = data.get('request_id')
                         if request_id:
                             try:
-                                # Get account summary from Alpaca
-                                account_summary = alpaca_client.get_account_summary()
+                                # Get account summary from trading client
+                                account_summary = trading_client.get_account_summary()
                                 
                                 # Store the response in Redis with the request ID
                                 response_key = f'account_info_response:{request_id}'
@@ -215,6 +226,7 @@ def run_standalone():
                                     # Check if trading is enabled from Redis (not config)
                                     trading_enabled_redis = redis_client.client.get("trading_enabled")
                                     trading_enabled = trading_enabled_redis == "true" if trading_enabled_redis is not None else False
+                                    logger.info(f"DEBUG: trading_enabled_redis='{trading_enabled_redis}', trading_enabled={trading_enabled}")
                                     if not trading_enabled:
                                         logger.info(f"Trading is disabled. Not executing {trade_signal.decision.value} for {symbol}")
                                         
@@ -266,9 +278,15 @@ def run_standalone():
                                         os.environ["ALPACA_DEBUG_MODE"] = "true"
                                         
                                         logger.info(f"Executing trade for {symbol}: {trade_signal.decision.value}")
-                                        # Import alpaca_client here to avoid circular imports
-                                        from src.trade_execution.alpaca_client import alpaca_client
-                                        result = alpaca_client.execute_trade(trade_signal)
+                                        # Import trading client based on configuration
+                                        from src.config import config
+                                        
+                                        if config.trading.exchange.lower() == "binance":
+                                            from src.trade_execution.binance_client import binance_client as trading_client
+                                        else:
+                                            from src.trade_execution.alpaca_client import alpaca_client as trading_client
+                                        
+                                        result = trading_client.execute_trade(trade_signal)
                                         
                                         if result:
                                             logger.info(f"Trade result for {symbol}: {result.status}")

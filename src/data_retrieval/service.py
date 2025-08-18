@@ -1,6 +1,7 @@
 import time
 import uuid
 import threading
+import sys
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -10,10 +11,8 @@ from src.data_retrieval.taapi_client import taapi_client
 
 logger = get_logger("data_retrieval_service")
 
-# Import version from setup.py
-import sys
-sys.path.insert(0, '..')
-from setup import VERSION
+# Version info
+VERSION = "1.0.0"
 
 if len(sys.argv) > 1 and sys.argv[1] == '--license':
     print(f"TraderMagic v{VERSION} - Licensed under AGPL-3.0")

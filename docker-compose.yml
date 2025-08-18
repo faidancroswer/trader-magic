@@ -115,13 +115,13 @@ services:
     networks:
       - trader_network
     restart: unless-stopped
-    # Simpler healthcheck with curl preinstalled in the container
+    # Healthcheck using the API endpoint
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/"]
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 60s
     logging:
       driver: "json-file"
       options:

@@ -18,6 +18,13 @@ class AlpacaConfig(BaseModel):
     api_secret: str = Field(default_factory=lambda: os.getenv("ALPACA_API_SECRET", ""))
     base_url: str = Field(default_factory=lambda: os.getenv("APCA_API_BASE_URL", "https://paper-api.alpaca.markets"))
 
+class BinanceConfig(BaseModel):
+    # API credentials
+    api_key: str = Field(default_factory=lambda: os.getenv("BINANCE_API_KEY", ""))
+    api_secret: str = Field(default_factory=lambda: os.getenv("BINANCE_API_SECRET", ""))
+    testnet: bool = Field(default_factory=lambda: os.getenv("BINANCE_TESTNET", "true").lower() == "true")
+    base_url: str = Field(default_factory=lambda: os.getenv("BINANCE_BASE_URL", "https://testnet.binancefuture.com"))
+
 class OllamaConfig(BaseModel):
     model: str = Field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3"))
     host: str = Field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://ollama:11434"))
@@ -32,6 +39,7 @@ class TradingConfig(BaseModel):
     trade_percentage: float = Field(default_factory=lambda: float(os.getenv("TRADE_PERCENTAGE", "2.0")))
     trade_fixed_amount: float = Field(default_factory=lambda: float(os.getenv("TRADE_FIXED_AMOUNT", "10.0")))
     use_fixed_amount: bool = Field(default_factory=lambda: os.getenv("TRADE_USE_FIXED", "false").lower() == "true")
+    exchange: str = Field(default_factory=lambda: os.getenv("TRADING_EXCHANGE", "binance"))
     # ALWAYS default to False for safety
     trading_enabled: bool = Field(default=False)
     poll_interval: int = Field(default_factory=lambda: int(os.getenv("POLL_INTERVAL", "120")))
@@ -52,6 +60,7 @@ class TradingConfig(BaseModel):
 class AppConfig(BaseModel):
     taapi: TaapiConfig = TaapiConfig()
     alpaca: AlpacaConfig = AlpacaConfig()
+    binance: BinanceConfig = BinanceConfig()
     ollama: OllamaConfig = OllamaConfig()
     redis: RedisConfig = RedisConfig()
     trading: TradingConfig = TradingConfig()

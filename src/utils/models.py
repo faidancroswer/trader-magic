@@ -45,7 +45,7 @@ class TradeSignal(BaseModel):
 class TradeResult(BaseModel):
     symbol: str
     decision: TradingDecision
-    order_id: str  # Non-optional to enforce consistent order IDs
+    order_id: Optional[str] = None  # Optional to handle error cases
     quantity: Optional[float] = None
     price: Optional[float] = None
     status: str = "unknown"  # Default value to prevent validation errors
