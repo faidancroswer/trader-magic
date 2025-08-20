@@ -28,6 +28,18 @@ docker compose exec redis redis-cli set trading_enabled false
 echo "Starting remaining trading services..."
 docker compose up -d
 
+# Wait for services to start
+echo "Waiting for services to initialize (10 seconds)..."
+sleep 10
+
+# Check Ollama status
+echo "Checking Ollama status..."
+if docker compose exec ollama curl -s http://localhost:11434/api/version > /dev/null 2>&1; then
+  echo "Ollama is running and responding"
+else
+  echo "Ollama is not responding, please check the container logs"
+fi
+
 echo "=================================================="
 echo "All services are now running!"
 echo "Web UI is available at: http://localhost:9753"

@@ -26,8 +26,9 @@ class BinanceConfig(BaseModel):
     base_url: str = Field(default_factory=lambda: os.getenv("BINANCE_BASE_URL", "https://testnet.binancefuture.com"))
 
 class OllamaConfig(BaseModel):
-    model: str = Field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3"))
+    model: str = Field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3.2:1b"))
     host: str = Field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://ollama:11434"))
+    enabled: bool = Field(default_factory=lambda: os.getenv("OLLAMA_ENABLED", "true").lower() == "true")
 
 class RedisConfig(BaseModel):
     host: str = Field(default_factory=lambda: os.getenv("REDIS_HOST", "redis"))
@@ -43,6 +44,10 @@ class TradingConfig(BaseModel):
     # ALWAYS default to False for safety
     trading_enabled: bool = Field(default=False)
     poll_interval: int = Field(default_factory=lambda: int(os.getenv("POLL_INTERVAL", "120")))
+    
+    # NOTIONAL filter handling
+    allow_min_notional_adjustment: bool = Field(default_factory=lambda: os.getenv("ALLOW_MIN_NOTIONAL_ADJUSTMENT", "true").lower() == "true")
+    min_notional_buffer_percent: float = Field(default_factory=lambda: float(os.getenv("MIN_NOTIONAL_BUFFER_PERCENT", "5.0")))
 
     # Use validator instead of field_validator for pydantic v1
     @validator("trade_percentage")

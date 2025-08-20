@@ -55,6 +55,7 @@ For detailed documentation on all aspects of TraderMagic, check out these guides
 - [🚦 Trading Modes](docs/trading-modes.md) - Paper/live trading and debug modes
 - [📊 Dashboard Features](docs/dashboard.md) - Using the web interface
 - [🔍 Troubleshooting Guide](docs/troubleshooting.md) - Solving common issues
+- [🔧 Ollama Troubleshooting](docs/troubleshooting-ollama.md) - Solving Ollama connection issues
 
 ## ⚠️ Disclaimer
 

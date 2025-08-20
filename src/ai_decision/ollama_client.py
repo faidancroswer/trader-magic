@@ -15,8 +15,15 @@ class OllamaClient:
     def __init__(self):
         self.host = config.ollama.host
         self.model = config.ollama.model
+        self.enabled = config.ollama.enabled
         self.api_url = f"{self.host}/api/generate"
         self.model_ready = False
+        
+        # If Ollama is disabled, set status and return
+        if not self.enabled:
+            self._update_model_status("disabled", "Ollama is disabled in configuration")
+            logger.info("Ollama is disabled in configuration")
+            return
         
         # Set initial status in Redis
         self._update_model_status("initializing", "Connecting to Ollama server...")
@@ -35,15 +42,40 @@ class OllamaClient:
         redis_client.set_json("ollama:status", status_data)
         logger.info(f"Ollama status: {status} - {message}")
     
+    def _wait_for_ollama(self):
+        """Wait for Ollama server to be ready"""
+        logger.info("Waiting for Ollama server to be ready...")
+        max_wait_time = 300  # 5 minutes
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait_time:
+            try:
+                response = httpx.get(f"{self.host}/api/version", timeout=5.0)
+                if response.status_code == 200:
+                    logger.info("Ollama server is ready")
+                    return True
+            except Exception as e:
+                logger.debug(f"Waiting for Ollama server: {e}")
+            
+            time.sleep(5)
+        
+        logger.error("Ollama server did not become ready within timeout period")
+        return False
+    
     def _monitor_model_status(self):
         """Background thread to monitor Ollama server and model status"""
+        # First wait for Ollama server to be ready
+        if not self._wait_for_ollama():
+            self._update_model_status("error", "Ollama server did not become ready within timeout period")
+            return
+        
         retry_count = 0
-        max_retries = 30  # Try for 5 minutes (10 second intervals)
+        max_retries = 60  # Try for 10 minutes (10 second intervals)
         
         while retry_count < max_retries:
             try:
-                # First check if server is available
-                response = httpx.get(f"{self.host}/api/tags", timeout=5.0)
+                # Check if server is available
+                response = httpx.get(f"{self.host}/api/tags", timeout=10.0)
                 response.raise_for_status()
                 
                 # Check if our model is available
@@ -64,9 +96,15 @@ class OllamaClient:
                     self.model_ready = True
                     return
                 
+            except httpx.TimeoutException as e:
+                self._update_model_status("error", "Timeout connecting to Ollama server...")
+                logger.warning(f"Ollama server timeout: {e}")
+            except httpx.HTTPError as e:
+                self._update_model_status("error", f"HTTP error connecting to Ollama server...")
+                logger.warning(f"Ollama server HTTP error: {e}")
             except Exception as e:
-                self._update_model_status("error", f"Waiting for Ollama server to be available...")
-                logger.warning(f"Ollama server not ready: {e}")
+                self._update_model_status("error", f"Error connecting to Ollama server...")
+                logger.warning(f"Ollama server error: {e}")
             
             # Wait before checking again
             time.sleep(10)
@@ -123,10 +161,41 @@ class OllamaClient:
                 self._update_model_status("ready", f"Model {self.model} is ready")
                 self.model_ready = True
             
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout while pulling model {self.model}: {e}")
+            self._update_model_status("error", f"Timeout while pulling model: {str(e)}")
+            raise httpx.TimeoutException(f"Timeout while pulling model {self.model}") from e
         except httpx.HTTPError as e:
+            logger.error(f"HTTP error while pulling model {self.model}: {e}")
+            self._update_model_status("error", f"HTTP error while pulling model: {str(e)}")
+            raise httpx.HTTPError(f"HTTP error while pulling model {self.model}") from e
+        except Exception as e:
             logger.error(f"Failed to pull model {self.model}: {e}")
             self._update_model_status("error", f"Failed to pull model: {str(e)}")
             raise
+    
+    def _get_fallback_response(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """
+        Generate a fallback response when Ollama is not available
+        
+        Args:
+            prompt: The user prompt
+            system_prompt: Optional system instructions
+            
+        Returns:
+            Fallback response based on simple rules
+        """
+        # Simple rule-based fallback for trading decisions
+        if "RSI" in prompt.upper() or "INDICATOR" in prompt.upper():
+            if "OVERBOUGHT" in prompt.upper() or "SELL" in prompt.upper() or "70" in prompt:
+                return "Based on the RSI indicator being over 70 (overbought), I recommend considering a SELL position. However, please verify with additional analysis before making any trading decisions."
+            elif "OVERSOLD" in prompt.upper() or "BUY" in prompt.upper() or "30" in prompt:
+                return "Based on the RSI indicator being under 30 (oversold), I recommend considering a BUY position. However, please verify with additional analysis before making any trading decisions."
+            else:
+                return "Based on the RSI indicator analysis, I recommend monitoring the market closely. When RSI is above 70, consider selling (overbought). When RSI is below 30, consider buying (oversold)."
+        
+        # General fallback response
+        return "I'm currently unable to provide AI-powered analysis. Please use traditional technical analysis methods or enable Ollama for enhanced insights. For RSI-based trading, consider buying when RSI < 30 (oversold) and selling when RSI > 70 (overbought)."
     
     @retry(
         stop=stop_after_attempt(3),
@@ -145,12 +214,20 @@ class OllamaClient:
         Returns:
             Generated text response
         """
+        # Check if Ollama is enabled and ready
+        if not self.enabled:
+            logger.info("Ollama is disabled, returning fallback response")
+            return self._get_fallback_response(prompt, system_prompt)
+            
         if not self.model_ready:
             status_data = redis_client.get_json("ollama:status") or {}
             status = status_data.get("status", "unknown")
             message = status_data.get("message", "Model not ready")
             logger.warning(f"Attempted to generate text while model not ready. Status: {status}, Message: {message}")
-            return f"Model not ready: {message}"
+            # Try one more time to check if model became ready
+            await self._check_model_ready()
+            if not self.model_ready:
+                return self._get_fallback_response(prompt, system_prompt)
         
         payload = {
             "model": self.model,
@@ -185,6 +262,29 @@ class OllamaClient:
         except httpx.HTTPError as e:
             logger.error(f"Error calling Ollama API: {e}")
             self._update_model_status("error", f"Error calling Ollama API: {str(e)}")
+            # Try to get more detailed error information
+            try:
+                error_detail = e.response.text if e.response else str(e)
+                logger.error(f"Detailed error: {error_detail}")
+            except:
+                pass
             raise
+    
+    async def _check_model_ready(self):
+        """Check if the model is ready by querying the Ollama API"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{self.host}/api/tags", timeout=10.0)
+                response.raise_for_status()
+                available_models = [model["name"] for model in response.json().get("models", [])]
+                
+                if self.model in available_models:
+                    self.model_ready = True
+                    self._update_model_status("ready", f"Model {self.model} is ready")
+                    logger.info(f"Model {self.model} is now ready")
+                else:
+                    logger.info(f"Model {self.model} is still not available")
+        except Exception as e:
+            logger.warning(f"Error checking model status: {e}")
 
 ollama_client = OllamaClient()

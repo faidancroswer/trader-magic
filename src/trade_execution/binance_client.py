@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceOrderException
 import uuid
+from decimal import Decimal, ROUND_DOWN
 
 from src.config import config
 from src.utils import get_logger, TradeSignal, TradingDecision, TradeResult
@@ -43,12 +44,18 @@ class BinanceClient:
                 server_time = self.client.get_server_time()
                 logger.info(f"Binance server time synced: {server_time}")
                 
-                # Set a larger recvWindow for all requests (default is 5000ms, we use 10000ms)
-                self.client.timestamp_offset = 0
+                # Calculate time offset between local and server time
+                import time
+                local_time = int(time.time() * 1000)
+                server_timestamp = server_time['serverTime']
+                time_offset = server_timestamp - local_time
+                
+                # Set timestamp offset to sync with server
+                self.client.timestamp_offset = time_offset
+                logger.info(f"Set timestamp offset: {time_offset}ms")
                 
                 # Small delay to ensure timestamp sync
-                import time
-                time.sleep(2)  # Increased delay
+                time.sleep(1)
                 
             except Exception as e:
                 logger.error(f"Failed to initialize Binance client: {e}")
@@ -75,7 +82,7 @@ class BinanceClient:
             if self.client:  # Only if client was created successfully
                 try:
                     # Test connection and get account info with very large recvWindow
-                    self.account_info = self.client.get_account(recvWindow=60000)  # 60 seconds
+                    self.account_info = self.client.get_account(recvWindow=10000)  # 10 seconds
                     logger.info("Successfully connected to Binance")
                     
                     # Log account balances for major assets
@@ -145,11 +152,11 @@ class BinanceClient:
                             # If we can't get price, skip this asset
                             pass
             
-            # Calculate daily change (simplified - using a baseline of 10,000 USDT initial value)
-            # This is a rough estimate since we don't have historical data
-            initial_portfolio_value = 10000.0  # Starting value in testnet
-            daily_change = total_value - initial_portfolio_value
-            daily_change_percent = (daily_change / initial_portfolio_value) * 100 if initial_portfolio_value > 0 else 0.0
+            # Daily change is not directly available for Binance Spot via a simple API call.
+            # It requires complex calculations involving historical trades and prices.
+            # For now, we will set it to 0.0 to avoid displaying incorrect information.
+            daily_change = 0.0
+            daily_change_percent = 0.0
             
             return {
                 "portfolio_value": total_value,
@@ -256,28 +263,42 @@ class BinanceClient:
                     'symbol': symbol,
                     'minQty': '0.00001',
                     'maxQty': '9000.00000000',
-                    'stepSize': '0.00001'
+                    'stepSize': '0.00001',
+                    'minNotional': '5.0',  # Default to 5 USDT (Binance real minimum)
+                    'maxNotional': '9000000.0' # Default max notional
                 }
             
             exchange_info = self.client.get_exchange_info()
             for symbol_info in exchange_info['symbols']:
                 if symbol_info['symbol'] == symbol:
                     # Extract LOT_SIZE filter
+                    # Extract LOT_SIZE and NOTIONAL filters
+                    symbol_filters = {
+                        'symbol': symbol,
+                        'minQty': '0.00001',
+                        'maxQty': '9000.00000000',
+                        'stepSize': '0.00001',
+                        'minNotional': '5.0',  # Default to 5 USDT (Binance real minimum)
+                        'maxNotional': '9000000.0' # Default max notional
+                    }
                     for filter_info in symbol_info['filters']:
                         if filter_info['filterType'] == 'LOT_SIZE':
-                            return {
-                                'symbol': symbol,
-                                'minQty': filter_info['minQty'],
-                                'maxQty': filter_info['maxQty'],
-                                'stepSize': filter_info['stepSize']
-                            }
+                            symbol_filters['minQty'] = filter_info['minQty']
+                            symbol_filters['maxQty'] = filter_info['maxQty']
+                            symbol_filters['stepSize'] = filter_info['stepSize']
+                        elif filter_info['filterType'] == 'NOTIONAL':
+                            symbol_filters['minNotional'] = filter_info['minNotional']
+                            symbol_filters['maxNotional'] = filter_info['maxNotional']
+                    return symbol_filters
             
             # Fallback if not found
             return {
                 'symbol': symbol,
                 'minQty': '0.00001',
                 'maxQty': '9000.00000000',
-                'stepSize': '0.00001'
+                'stepSize': '0.00001',
+                'minNotional': '5.0',  # Default to 5 USDT (Binance real minimum)
+                'maxNotional': '9000000.0' # Default max notional
             }
             
         except Exception as e:
@@ -287,12 +308,13 @@ class BinanceClient:
                 'symbol': symbol,
                 'minQty': '0.00001',
                 'maxQty': '9000.00000000',
-                'stepSize': '0.00001'
+                'stepSize': '0.00001',
+                'minNotional': '5.0',  # Default to 5 USDT (Binance real minimum)
+                'maxNotional': '9000000.0' # Default max notional
             }
     
     def adjust_quantity_to_lot_size(self, quantity: float, symbol_info: Dict[str, Any]) -> str:
         """Adjust quantity to comply with LOT_SIZE requirements"""
-        from decimal import Decimal, ROUND_DOWN
         
         min_qty = Decimal(symbol_info['minQty'])
         max_qty = Decimal(symbol_info['maxQty'])
@@ -329,6 +351,62 @@ class BinanceClient:
         logger.info(f"Adjusted quantity: {quantity} -> {qty_str} (min: {min_qty}, step: {step_size})")
         return qty_str
 
+    def adjust_quantity_to_meet_notional(self, quantity: float, price: float, symbol_info: Dict[str, Any]) -> Tuple[str, float]:
+        """Adjust quantity to meet both LOT_SIZE and NOTIONAL requirements"""
+        from decimal import Decimal, ROUND_DOWN
+        
+        min_notional = Decimal(symbol_info.get('minNotional', '5.0'))
+        step_size = Decimal(symbol_info['stepSize'])
+        min_qty = Decimal(symbol_info['minQty'])
+        max_qty = Decimal(symbol_info['maxQty'])
+        
+        # Convert to Decimal for precision
+        qty_decimal = Decimal(str(quantity))
+        price_decimal = Decimal(str(price))
+        
+        # First, ensure we meet LOT_SIZE requirements
+        qty_decimal = self._adjust_to_lot_size_decimal(qty_decimal, min_qty, step_size, max_qty)
+        
+        # Check if we meet NOTIONAL requirements
+        notional_value = qty_decimal * price_decimal
+        
+        # If not, iteratively increase quantity until we meet NOTIONAL requirement
+        while notional_value < min_notional and qty_decimal < max_qty:
+            # Add one step size
+            qty_decimal += step_size
+            # Re-adjust to LOT_SIZE if needed
+            qty_decimal = self._adjust_to_lot_size_decimal(qty_decimal, min_qty, step_size, max_qty)
+            # Recalculate notional value
+            notional_value = qty_decimal * price_decimal
+            
+            # Safety check to prevent infinite loop
+            if qty_decimal > max_qty:
+                break
+        
+        # Final check
+        if notional_value < min_notional:
+            raise ValueError(f"Cannot meet minimum notional value of {min_notional} with max quantity {max_qty}")
+        
+        return str(qty_decimal.normalize()), float(notional_value)
+
+    def _adjust_to_lot_size_decimal(self, qty: 'Decimal', min_qty: 'Decimal', step_size: 'Decimal', max_qty: 'Decimal') -> 'Decimal':
+        """Adjust quantity to comply with LOT_SIZE requirements using Decimal arithmetic"""
+        # Ensure minimum quantity
+        if qty < min_qty:
+            qty = min_qty
+        
+        # Ensure maximum quantity
+        if qty > max_qty:
+            qty = max_qty
+        
+        # Adjust to step size
+        if step_size > 0:
+            # Formula: quantity = min_qty + (floor((quantity - min_qty) / step_size) * step_size)
+            steps = ((qty - min_qty) / step_size).quantize(Decimal('1'), rounding=ROUND_DOWN)
+            qty = min_qty + (steps * step_size)
+        
+        return qty
+
     def execute_trade(self, signal: TradeSignal) -> Optional[TradeResult]:
         """Execute a trade based on a signal"""
         try:
@@ -361,26 +439,73 @@ class BinanceClient:
             ticker = self.client.get_symbol_ticker(symbol=symbol)
             current_price = float(ticker['price'])
             
+            # CHECK MIN NOTIONAL BEFORE CALCULATING QUANTITY
+            # Get symbol information for NOTIONAL requirements
+            min_notional = float(symbol_info.get('minNotional', 5.0))
+            
+            # Apply buffer percentage if configured
+            buffer_percent = config.trading.min_notional_buffer_percent
+            buffered_min_notional = min_notional * (1 + buffer_percent / 100)
+            logger.info(f"Min notional: {min_notional}, Buffered min notional: {buffered_min_notional:.2f} ({buffer_percent}% buffer)")
+            
             # Calculate quantity based on configuration
             account_summary = self.get_account_summary()
             
             if config.trading.use_fixed_amount:
                 trade_amount = config.trading.trade_fixed_amount
                 logger.info(f"Using fixed amount: ${trade_amount}")
+                
+                # If trade amount is below minimum notional, adjust or skip
+                if trade_amount < buffered_min_notional:
+                    logger.warning(f"Trade amount ${trade_amount} is below buffered minimum notional ${buffered_min_notional:.2f}")
+                    if config.trading.allow_min_notional_adjustment:
+                        trade_amount = buffered_min_notional
+                        logger.info(f"Adjusted trade amount to buffered minimum notional: ${trade_amount:.2f}")
+                    else:
+                        logger.error(f"Trade amount ${trade_amount} below buffered minimum notional ${buffered_min_notional:.2f} and adjustment not allowed")
+                        return TradeResult(
+                            symbol=signal.symbol,
+                            decision=signal.decision,
+                            order_id=None,
+                            quantity=None,
+                            price=current_price,
+                            status="failed",
+                            error=f"Trade amount ${trade_amount} below minimum notional ${buffered_min_notional:.2f}",
+                            timestamp=datetime.now()
+                        )
             else:
                 trade_amount = account_summary["cash_balance"] * (config.trading.trade_percentage / 100)
                 logger.info(f"Using {config.trading.trade_percentage}% of balance: ${trade_amount}")
+                
+                # For percentage-based trades, adjust to minimum notional if needed
+                if trade_amount < buffered_min_notional:
+                    trade_amount = buffered_min_notional
+                    logger.info(f"Adjusted trade amount to buffered minimum notional: ${trade_amount:.2f}")
             
             quantity = trade_amount / current_price
-            logger.info(f"Initial calculated quantity: {quantity} {symbol.replace('USDT', '')} (${trade_amount} ÷ ${current_price})")
+            logger.info(f"Initial calculated quantity: {quantity} {symbol.replace('USDT', '')} (${trade_amount:.2f} ÷ ${current_price})")
             
-            # Adjust quantity to comply with LOT_SIZE requirements
-            quantity_str = self.adjust_quantity_to_lot_size(quantity, symbol_info)
+            # Adjust quantity to meet both LOT_SIZE and NOTIONAL requirements
+            try:
+                quantity_str, final_notional = self.adjust_quantity_to_meet_notional(quantity, current_price, symbol_info)
+                logger.info(f"Adjusted quantity to meet NOTIONAL requirements: {quantity_str} (${final_notional:.2f})")
+            except ValueError as e:
+                logger.error(f"Could not adjust quantity to meet NOTIONAL requirements: {e}")
+                return TradeResult(
+                    symbol=signal.symbol,
+                    decision=signal.decision,
+                    order_id=None,
+                    quantity=None,
+                    price=current_price,
+                    status="failed",
+                    error=str(e),
+                    timestamp=datetime.now()
+                )
             
             # Validate final quantity
             final_quantity = float(quantity_str)
             min_quantity = float(symbol_info['minQty'])
-            
+    
             if final_quantity <= 0:
                 logger.warning(f"Final quantity is 0 for {signal.symbol}")
                 return TradeResult(
@@ -410,6 +535,7 @@ class BinanceClient:
             # Validate final quantity format
             import re
             binance_pattern = r'^([0-9]{1,20})(\.[0-9]{1,20})?$'
+    
             is_valid = bool(re.match(binance_pattern, quantity_str))
             
             logger.info(f"Final quantity: '{quantity_str}' (valid: {is_valid})")
@@ -512,6 +638,10 @@ class BinanceClient:
     def get_positions(self) -> List[Dict[str, Any]]:
         """Get current positions"""
         try:
+            if self.debug_mode:
+                # Return mock positions for debug mode
+                return []
+            
             account = self.client.get_account()
             positions = []
             
@@ -541,6 +671,9 @@ class BinanceClient:
             
         except BinanceAPIException as e:
             logger.error(f"Error getting positions: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error getting positions: {e}")
             return []
 
 # Create singleton instance

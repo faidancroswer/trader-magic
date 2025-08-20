@@ -417,6 +417,14 @@ function updatePriceChart(symbolKey, data) {
         return;
     }
     
+    // NEW: Add debugging to see what data we're getting
+    console.log(`Price history data for ${symbolKey}:`, {
+        prices: data.price_history.prices,
+        timestamps: data.price_history.timestamps,
+        market_statuses: data.price_history.market_statuses,
+        prices_length: data.price_history.prices.length
+    });
+    
     try {
         // Format data for Chart.js with safe access to properties
         const prices = data.price_history.prices || [];
