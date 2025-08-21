@@ -355,6 +355,31 @@ class BinanceFuturesClient:
             logger.error(f"Error setting leverage for {symbol}: {e}")
             return None
 
+    def set_position_mode(self, dual_side_position: bool = False):
+        """Set position mode for futures trading
+        Args:
+            dual_side_position: False for One-way Mode, True for Hedge Mode
+        """
+        try:
+            if self.debug_mode:
+                logger.info(f"DEBUG MODE: Would set position mode to {'Hedge Mode' if dual_side_position else 'One-way Mode'}")
+                return
+            
+            # Set position mode
+            response = self.client.futures_change_position_mode(dualSidePosition=dual_side_position)
+            mode = "Hedge Mode" if dual_side_position else "One-way Mode"
+            logger.info(f"Set position mode to {mode}")
+            return response
+        except Exception as e:
+            # If the error is that the position mode is already set, we can ignore it
+            if "No need to change position side" in str(e):
+                mode = "Hedge Mode" if dual_side_position else "One-way Mode"
+                logger.info(f"Position mode is already set to {mode}")
+                return {"msg": f"Position mode is already set to {mode}"}
+            else:
+                logger.error(f"Error setting position mode: {e}")
+                return None
+
     def execute_trade(self, signal: TradeSignal) -> Optional[TradeResult]:
         """Execute a trade based on a signal in futures market"""
         try:
@@ -378,6 +403,9 @@ class BinanceFuturesClient:
                 
                 logger.info(f"DEBUG MODE: Simulated {signal.decision.value} order for {signal.symbol}")
                 return result
+            
+            # Set position mode to One-way Mode to avoid position side conflicts
+            self.set_position_mode(dual_side_position=False)
             
             # Get symbol information for LOT_SIZE requirements
             symbol_info = self.get_symbol_info(symbol)
@@ -603,17 +631,16 @@ class BinanceFuturesClient:
             
             # Determine order side and position side using effective decision
             side = "BUY" if effective_decision == TradingDecision.BUY else "SELL"
-            position_side = "LONG" if effective_decision == TradingDecision.BUY else "SHORT"
             
-            logger.info(f"Placing {side} {position_side} order for {quantity_str} {symbol} at ~${current_price:.2f}")
+            logger.info(f"Placing {side} order for {quantity_str} {symbol} at ~${current_price:.2f}")
             
             # Log the exact parameters being sent to Binance
+            # For One-way Mode, we don't need to specify positionSide
             order_params = {
                 'symbol': symbol,
                 'side': side,
                 'type': 'MARKET',
                 'quantity': quantity_str,
-                'positionSide': position_side,  # For futures, we need to specify position side
                 'recvWindow': 60000
             }
             logger.info(f"DEBUG: Sending order to Binance with params: {order_params}")
@@ -635,7 +662,6 @@ class BinanceFuturesClient:
                             side="BUY",
                             type='MARKET',
                             quantity=quantity_str,
-                            positionSide=position_side,
                             recvWindow=60000
                         )
                     else:
@@ -645,7 +671,6 @@ class BinanceFuturesClient:
                             side="SELL",
                             type='MARKET',
                             quantity=quantity_str,
-                            positionSide=position_side,
                             recvWindow=60000
                         )
                     logger.info(f"DEBUG: Fallback method successful")
@@ -653,7 +678,7 @@ class BinanceFuturesClient:
                     logger.error(f"Fallback method also failed: {fallback_error}")
                     raise fallback_error
             
-            logger.info(f"Placed {side} {position_side} order for {quantity_str} {symbol} at ~${current_price:.2f}")
+            logger.info(f"Placed {side} order for {quantity_str} {symbol} at ~${current_price:.2f}")
             
             # Create the trade result
             result = TradeResult(
