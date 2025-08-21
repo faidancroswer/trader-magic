@@ -224,7 +224,7 @@ def run_standalone():
                                 # Only execute if this is a BUY or SELL (not HOLD)
                                 if trade_signal.decision.value != "hold":
                                     # Check if trading is enabled from Redis (not config)
-                                    trading_enabled_redis = redis_client.client.get("trading_enabled")
+                                    trading_enabled_redis = redis_client.get("trading_enabled")
                                     trading_enabled = trading_enabled_redis == "true" if trading_enabled_redis is not None else False
                                     logger.info(f"DEBUG: trading_enabled_redis='{trading_enabled_redis}', trading_enabled={trading_enabled}")
                                     if not trading_enabled:
@@ -253,7 +253,7 @@ def run_standalone():
                                         logger.info(f"Created standard disabled service message for {symbol}")
                                         
                                         # Push an immediate keyspace notification to refresh UI
-                                        redis_client.client.publish('__keyspace@0__:' + redis_key, 'set')
+                                        redis_client.publish('__keyspace@0__:' + redis_key, 'set')
                                         logger.info(f"Sent keyspace notification for immediate refresh: {redis_key}")
                                         continue
                                     

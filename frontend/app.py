@@ -694,7 +694,7 @@ def toggle_trading():
         # When trading state changes, create appropriate trade result messages
         try:
             # 1. Publish standard message for services
-            redis_client.client.publish('settings:update', json.dumps({
+            redis_client.publish('settings:update', json.dumps({
                 'trading_enabled': enabled
             }))
             print(f"Published trading status update to Redis: {'enabled' if enabled else 'disabled'}")
@@ -706,7 +706,7 @@ def toggle_trading():
                 for symbol in symbols:
                     try:
                         # Get current signal for this symbol to include its decision
-                        signal_data = redis_client.client.get(f"signal:{symbol}")
+                        signal_data = redis_client.get(f"signal:{symbol}")
                         if signal_data:
                             # Only create disabled messages for non-HOLD signals
                             signal_json = json.loads(signal_data)

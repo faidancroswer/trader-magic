@@ -13,12 +13,12 @@ if docker ps | grep -q ollama; then
     
     # Check if the required model is available
     MODEL="${OLLAMA_MODEL:-llama3.2:1b}"
-    if curl -s http://ollama:11434/api/tags | grep -q "$MODEL"; then
+    if curl -s http://ollama:11434/api/tags | jq -r '.models[].name' | grep -q "^${MODEL}$"; then
       echo "Required model $MODEL is available"
       exit 0
     else
       echo "Required model $MODEL is not available, pulling model..."
-      curl -X POST http://ollama:11434/api/pull \
+      curl --max-time 300 -X POST http://ollama:11434/api/pull \
         -H "Content-Type: application/json" \
         -d "{\"name\":\"$MODEL\"}"
       echo "Model pull initiated"

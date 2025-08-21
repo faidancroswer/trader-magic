@@ -7,7 +7,7 @@ import uuid
 from decimal import Decimal, ROUND_DOWN
 
 from src.config import config
-from src.utils import get_logger, TradeSignal, TradingDecision, TradeResult
+from src.utils import get_logger, TradeSignal, TradingDecision, TradeResult, risk_manager, redis_client
 
 logger = get_logger("binance_client")
 
@@ -439,6 +439,44 @@ class BinanceClient:
             ticker = self.client.get_symbol_ticker(symbol=symbol)
             current_price = float(ticker['price'])
             
+            # Check stop loss and take profit before executing any trade
+            exit_decision = risk_manager.check_stop_loss_take_profit(signal.symbol, current_price)
+            if exit_decision:
+                # Create an opposite signal to close the position
+                logger.info(f"Executing {exit_decision.value} order to close position based on stop loss/take profit")
+                # We'll continue with the trade but with the exit decision instead
+                effective_decision = exit_decision
+            else:
+                # Check position limits
+                if not risk_manager.check_position_limits(signal.symbol):
+                    logger.warning(f"Position limit reached for {signal.symbol}")
+                    return TradeResult(
+                        symbol=signal.symbol,
+                        decision=signal.decision,
+                        order_id=None,
+                        quantity=None,
+                        price=current_price,
+                        status="failed",
+                        error="Position limit reached",
+                        timestamp=datetime.now()
+                    )
+                
+                # Check daily limits
+                if not risk_manager.check_daily_limits():
+                    logger.warning(f"Daily limits reached")
+                    return TradeResult(
+                        symbol=signal.symbol,
+                        decision=signal.decision,
+                        order_id=None,
+                        quantity=None,
+                        price=current_price,
+                        status="failed",
+                        error="Daily trading limits reached",
+                        timestamp=datetime.now()
+                    )
+                
+                effective_decision = signal.decision
+            
             # CHECK MIN NOTIONAL BEFORE CALCULATING QUANTITY
             # Get symbol information for NOTIONAL requirements
             min_notional = float(symbol_info.get('minNotional', 5.0))
@@ -450,10 +488,26 @@ class BinanceClient:
             
             # Calculate quantity based on configuration
             account_summary = self.get_account_summary()
+            available_balance = account_summary["cash_balance"]
+            logger.info(f"Available balance: ${available_balance}")
             
             if config.trading.use_fixed_amount:
                 trade_amount = config.trading.trade_fixed_amount
                 logger.info(f"Using fixed amount: ${trade_amount}")
+                
+                # Check if we have sufficient balance
+                if trade_amount > available_balance:
+                    logger.warning(f"Insufficient balance. Available: ${available_balance}, Required: ${trade_amount}")
+                    return TradeResult(
+                        symbol=signal.symbol,
+                        decision=signal.decision,
+                        order_id=None,
+                        quantity=None,
+                        price=current_price,
+                        status="failed",
+                        error=f"Insufficient balance. Available: ${available_balance}, Required: ${trade_amount}",
+                        timestamp=datetime.now()
+                    )
                 
                 # If trade amount is below minimum notional, adjust or skip
                 if trade_amount < buffered_min_notional:
@@ -461,6 +515,20 @@ class BinanceClient:
                     if config.trading.allow_min_notional_adjustment:
                         trade_amount = buffered_min_notional
                         logger.info(f"Adjusted trade amount to buffered minimum notional: ${trade_amount:.2f}")
+                        
+                        # Check if we have sufficient balance after adjustment
+                        if trade_amount > available_balance:
+                            logger.warning(f"Insufficient balance after adjustment. Available: ${available_balance}, Required: ${trade_amount}")
+                            return TradeResult(
+                                symbol=signal.symbol,
+                                decision=signal.decision,
+                                order_id=None,
+                                quantity=None,
+                                price=current_price,
+                                status="failed",
+                                error=f"Insufficient balance after adjustment. Available: ${available_balance}, Required: ${trade_amount}",
+                                timestamp=datetime.now()
+                            )
                     else:
                         logger.error(f"Trade amount ${trade_amount} below buffered minimum notional ${buffered_min_notional:.2f} and adjustment not allowed")
                         return TradeResult(
@@ -477,10 +545,38 @@ class BinanceClient:
                 trade_amount = account_summary["cash_balance"] * (config.trading.trade_percentage / 100)
                 logger.info(f"Using {config.trading.trade_percentage}% of balance: ${trade_amount}")
                 
+                # Check if we have sufficient balance
+                if trade_amount > available_balance:
+                    logger.warning(f"Insufficient balance. Available: ${available_balance}, Required: ${trade_amount}")
+                    return TradeResult(
+                        symbol=signal.symbol,
+                        decision=signal.decision,
+                        order_id=None,
+                        quantity=None,
+                        price=current_price,
+                        status="failed",
+                        error=f"Insufficient balance. Available: ${available_balance}, Required: ${trade_amount}",
+                        timestamp=datetime.now()
+                    )
+                
                 # For percentage-based trades, adjust to minimum notional if needed
                 if trade_amount < buffered_min_notional:
                     trade_amount = buffered_min_notional
                     logger.info(f"Adjusted trade amount to buffered minimum notional: ${trade_amount:.2f}")
+                    
+                    # Check if we have sufficient balance after adjustment
+                    if trade_amount > available_balance:
+                        logger.warning(f"Insufficient balance after adjustment. Available: ${available_balance}, Required: ${trade_amount}")
+                        return TradeResult(
+                            symbol=signal.symbol,
+                            decision=signal.decision,
+                            order_id=None,
+                            quantity=None,
+                            price=current_price,
+                            status="failed",
+                            error=f"Insufficient balance after adjustment. Available: ${available_balance}, Required: ${trade_amount}",
+                            timestamp=datetime.now()
+                        )
             
             quantity = trade_amount / current_price
             logger.info(f"Initial calculated quantity: {quantity} {symbol.replace('USDT', '')} (${trade_amount:.2f} ÷ ${current_price})")
@@ -553,8 +649,8 @@ class BinanceClient:
                     timestamp=datetime.now()
                 )
             
-            # Determine order side
-            side = "BUY" if signal.decision == TradingDecision.BUY else "SELL"
+            # Determine order side using effective decision
+            side = "BUY" if effective_decision == TradingDecision.BUY else "SELL"
             
             logger.info(f"Placing {side} order for {quantity_str} {symbol} at ~${current_price:.2f}")
             
@@ -599,16 +695,34 @@ class BinanceClient:
             
             logger.info(f"Placed {side} order for {quantity_str} {symbol} at ~${current_price:.2f}")
             
-            return TradeResult(
+            # Create the trade result
+            result = TradeResult(
                 symbol=signal.symbol,
-                decision=signal.decision,
+                decision=effective_decision,  # Use effective decision (could be stop loss/take profit)
                 order_id=order['orderId'],
-                quantity=float(order['executedQty']) if 'executedQty' in order else quantity,
+                quantity=float(order['executedQty']) if 'executedQty' in order else final_quantity,
                 price=float(order['fills'][0]['price']) if order.get('fills') else current_price,
                 status="executed",
                 error=None,
                 timestamp=datetime.now()
             )
+            
+            # Update position information
+            if result.status == "executed":
+                if side == "BUY":
+                    risk_manager.update_position(signal.symbol, final_quantity, current_price, TradingDecision.BUY)
+                else:
+                    # Remove position when selling
+                    positions_key = "current_positions"
+                    positions_data = redis_client.get_json(positions_key)
+                    if positions_data and signal.symbol in positions_data:
+                        del positions_data[signal.symbol]
+                        redis_client.set_json(positions_key, positions_data, ttl=86400)
+            
+            # Update daily stats
+            risk_manager.update_daily_stats(result)
+            
+            return result
             
         except BinanceAPIException as e:
             logger.error(f"Binance API error executing trade: {e}")

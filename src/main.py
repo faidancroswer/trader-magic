@@ -63,7 +63,7 @@ def setup_services():
     
     # Double-check the value was set correctly
     from src.utils import redis_client
-    trading_enabled = redis_client.client.get("trading_enabled")
+    trading_enabled = redis_client.get("trading_enabled")
     logger.info(f"VERIFY: 'trading_enabled' is currently set to '{trading_enabled}' in Redis")
     
     # Start the data retrieval service

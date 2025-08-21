@@ -2,7 +2,7 @@
 
 # TraderMagic 🧙‍♂️💹
 
-An AI-powered automated trading system built with Python, running entirely on your local machine. The system uses Ollama for AI decision-making, TAAPI.io for technical indicators, and Alpaca for trade execution.
+An AI-powered automated trading system built with Python, running entirely on your local machine. The system uses Ollama for AI decision-making, TAAPI.io for technical indicators, and Binance for trade execution.
 
 ## ✨ Features
 
@@ -15,6 +15,9 @@ An AI-powered automated trading system built with Python, running entirely on yo
 - 🔒 **Paper trading mode** for risk-free testing
 - 🔄 **Redis-powered communication** between services
 - 🐳 **Docker-based deployment** for easy setup
+- ⚖️ **Risk management** with stop loss, take profit, and position limits
+
+## 🏗️ System Architecture
 
 ## 🏗️ System Architecture
 
@@ -54,6 +57,7 @@ For detailed documentation on all aspects of TraderMagic, check out these guides
 - [🔌 API Integrations](docs/api-integration.md) - Configuring external APIs
 - [🚦 Trading Modes](docs/trading-modes.md) - Paper/live trading and debug modes
 - [📊 Dashboard Features](docs/dashboard.md) - Using the web interface
+- [⚖️ Low Risk Mode](LOW_RISK_MODE.md) - Operating with limited capital
 - [🔍 Troubleshooting Guide](docs/troubleshooting.md) - Solving common issues
 - [🔧 Ollama Troubleshooting](docs/troubleshooting-ollama.md) - Solving Ollama connection issues
 

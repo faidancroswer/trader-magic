@@ -126,7 +126,7 @@ services:
     container_name: ollama_init
     volumes:
       - ./scripts:/scripts
-    command: sh /scripts/init-ollama.sh
+    command: sh /scripts/init-ollama-fixed.sh
     environment:
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:1b}
     depends_on:
