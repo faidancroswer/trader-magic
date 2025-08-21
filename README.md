@@ -16,6 +16,7 @@ An AI-powered automated trading system built with Python, running entirely on yo
 - 🔄 **Redis-powered communication** between services
 - 🐳 **Docker-based deployment** for easy setup
 - ⚖️ **Risk management** with stop loss, take profit, and position limits
+- 📈 **Binance Futures support** for short selling and leverage trading
 
 ## 🏗️ System Architecture
 
@@ -47,6 +48,17 @@ docker compose up -d
 # Access the dashboard
 # Open http://localhost:9753 in your browser
 ```
+
+## 📈 Binance Futures Mode
+
+TraderMagic supports Binance Futures trading, enabling:
+- Short selling (sell assets you don't own)
+- Leverage trading (amplify potential profits and losses)
+- Advanced risk management with stop-loss and take-profit
+
+To enable Futures mode, set `BINANCE_FUTURES_MODE=true` in your `.env` file.
+
+See [Binance Futures Mode Documentation](docs/binance_futures_mode.md) for detailed setup instructions.
 
 ## 📚 Documentation
 

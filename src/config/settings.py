@@ -24,6 +24,9 @@ class BinanceConfig(BaseModel):
     api_secret: str = Field(default_factory=lambda: os.getenv("BINANCE_API_SECRET", ""))
     testnet: bool = Field(default_factory=lambda: os.getenv("BINANCE_TESTNET", "true").lower() == "true")
     base_url: str = Field(default_factory=lambda: os.getenv("BINANCE_BASE_URL", "https://testnet.binancefuture.com"))
+    # Futures configuration
+    futures_leverage: int = Field(default_factory=lambda: int(os.getenv("BINANCE_FUTURES_LEVERAGE", "10")))
+    futures_mode: bool = Field(default_factory=lambda: os.getenv("BINANCE_FUTURES_MODE", "false").lower() == "true")
 
 class OllamaConfig(BaseModel):
     model: str = Field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3.2:1b"))

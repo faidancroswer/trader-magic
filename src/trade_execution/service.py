@@ -43,7 +43,11 @@ class TradeExecutionService:
         from src.config import config
         
         if config.trading.exchange.lower() == "binance":
-            from src.trade_execution.binance_client import binance_client as trading_client
+            # Check if we should use futures mode
+            if config.binance.futures_mode:
+                from src.trade_execution.binance_futures_client import binance_futures_client as trading_client
+            else:
+                from src.trade_execution.binance_client import binance_client as trading_client
         else:
             from src.trade_execution.alpaca_client import alpaca_client as trading_client
         
@@ -126,7 +130,11 @@ def start_listeners():
         
         # Import trading client based on configuration
         if config.trading.exchange.lower() == "binance":
-            from src.trade_execution.binance_client import binance_client as trading_client
+            # Check if we should use futures mode
+            if config.binance.futures_mode:
+                from src.trade_execution.binance_futures_client import binance_futures_client as trading_client
+            else:
+                from src.trade_execution.binance_client import binance_client as trading_client
         else:
             from src.trade_execution.alpaca_client import alpaca_client as trading_client
         
@@ -282,7 +290,11 @@ def run_standalone():
                                         from src.config import config
                                         
                                         if config.trading.exchange.lower() == "binance":
-                                            from src.trade_execution.binance_client import binance_client as trading_client
+                                            # Check if we should use futures mode
+                                            if config.binance.futures_mode:
+                                                from src.trade_execution.binance_futures_client import binance_futures_client as trading_client
+                                            else:
+                                                from src.trade_execution.binance_client import binance_client as trading_client
                                         else:
                                             from src.trade_execution.alpaca_client import alpaca_client as trading_client
                                         

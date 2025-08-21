@@ -77,17 +77,21 @@ class RiskManager:
                 positions_data = {}
                 
             # Update position
+            # For futures, we need to track both long and short positions
+            position_type = "LONG" if decision == TradingDecision.BUY else "SHORT"
+            
             positions_data[symbol] = {
                 "quantity": quantity,
                 "entry_price": price,
                 "decision": decision.value,
+                "position_type": position_type,
                 "stop_loss": price * (1 - self.stop_loss_percent/100) if decision == TradingDecision.BUY else price * (1 + self.stop_loss_percent/100),
                 "take_profit": price * (1 + self.take_profit_percent/100) if decision == TradingDecision.BUY else price * (1 - self.take_profit_percent/100)
             }
             
             # Save to Redis
             redis_client.set_json(positions_key, positions_data, ttl=86400)  # 24 hour TTL
-            logger.info(f"Updated position for {symbol}")
+            logger.info(f"Updated position for {symbol} ({position_type})")
         except Exception as e:
             logger.error(f"Error updating position: {e}")
             
@@ -104,24 +108,25 @@ class RiskManager:
                 
             position = positions_data[symbol]
             decision = position["decision"]
+            position_type = position.get("position_type", "LONG")  # Default to LONG for backward compatibility
             stop_loss = position["stop_loss"]
             take_profit = position["take_profit"]
             
             # Check stop loss
-            if decision == "buy" and current_price <= stop_loss:
-                logger.info(f"Stop loss triggered for {symbol}. Current price: ${current_price}, Stop loss: ${stop_loss}")
-                return TradingDecision.SELL
-            elif decision == "sell" and current_price >= stop_loss:
-                logger.info(f"Stop loss triggered for {symbol}. Current price: ${current_price}, Stop loss: ${stop_loss}")
-                return TradingDecision.BUY
-                
-            # Check take profit
-            if decision == "buy" and current_price >= take_profit:
-                logger.info(f"Take profit triggered for {symbol}. Current price: ${current_price}, Take profit: ${take_profit}")
-                return TradingDecision.SELL
-            elif decision == "sell" and current_price <= take_profit:
-                logger.info(f"Take profit triggered for {symbol}. Current price: ${current_price}, Take profit: ${take_profit}")
-                return TradingDecision.BUY
+            if position_type == "LONG":  # Traditional long position
+                if current_price <= stop_loss:
+                    logger.info(f"Stop loss triggered for {symbol} (LONG). Current price: ${current_price}, Stop loss: ${stop_loss}")
+                    return TradingDecision.SELL
+                elif current_price >= take_profit:
+                    logger.info(f"Take profit triggered for {symbol} (LONG). Current price: ${current_price}, Take profit: ${take_profit}")
+                    return TradingDecision.SELL
+            else:  # SHORT position
+                if current_price >= stop_loss:
+                    logger.info(f"Stop loss triggered for {symbol} (SHORT). Current price: ${current_price}, Stop loss: ${stop_loss}")
+                    return TradingDecision.BUY
+                elif current_price <= take_profit:
+                    logger.info(f"Take profit triggered for {symbol} (SHORT). Current price: ${current_price}, Take profit: ${take_profit}")
+                    return TradingDecision.BUY
                 
             return None
         except Exception as e:
