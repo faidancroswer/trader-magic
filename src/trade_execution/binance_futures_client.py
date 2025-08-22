@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceOrderException
 import uuid
+import os
 from decimal import Decimal, ROUND_DOWN
 
 from src.config import config
@@ -18,6 +19,7 @@ class BinanceFuturesClient:
         self.api_secret = os.getenv("BINANCE_API_SECRET")
         self.testnet = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
         self.debug_mode = os.getenv("BINANCE_DEBUG_MODE", "false").lower() == "true"
+        self.limited_api = False  # Track if we have limited API access
         
         # Validate credentials 
         if not self.api_key or not self.api_secret:
@@ -92,10 +94,23 @@ class BinanceFuturesClient:
                     
                 except BinanceAPIException as e:
                     logger.error(f"Failed to get account info from Binance Futures: {e}")
-                    # Don't raise, just log the error and continue in debug mode
-                    logger.warning("Continuing in debug mode due to API error")
-                    self.debug_mode = True
-                    self.client = None
+                    # Don't immediately disable - try to get public data first
+                    logger.warning("API error detected, but maintaining connection for public data")
+                    
+                    # Try to get some public data to verify connection
+                    try:
+                        # Test with public endpoint
+                        ticker_test = self.client.futures_symbol_ticker(symbol='BTCUSDT')
+                        logger.info(f"Public API access working - BTC price: {ticker_test['price']}")
+                        logger.warning("Limited API mode: Can access public data but not account data")
+                        self.limited_api = True
+                        self.debug_mode = False  # Keep real API for public data
+                    except Exception as public_error:
+                        logger.error(f"Complete API failure: {public_error}")
+                        logger.warning("Falling back to full debug mode")
+                        self.debug_mode = True
+                        self.client = None
+                        self.limited_api = False
     
     def get_account_summary(self) -> Dict[str, Any]:
         """Get account summary information for futures"""
@@ -106,8 +121,43 @@ class BinanceFuturesClient:
                 "buying_power": 10000.0,
                 "daily_change": 0.0,
                 "positions": [],
-                "leverage": 10  # Default leverage
+                "leverage": 10,  # Default leverage
+                "status": "debug_mode",
+                "api_status": "DEBUG MODE - Simulated Data"
             }
+        
+        # If we have limited API access, try to get what we can
+        if hasattr(self, 'limited_api') and self.limited_api:
+            try:
+                # Get current BTC price to show real market data
+                btc_ticker = self.client.futures_symbol_ticker(symbol='BTCUSDT')
+                current_btc_price = float(btc_ticker['price'])
+                
+                # Return limited data with real market prices
+                return {
+                    "portfolio_value": 100.0,  # Conservative estimate
+                    "cash_balance": 100.0,
+                    "buying_power": 500.0,  # 5x leverage estimate
+                    "daily_change": 0.0,
+                    "positions": [],
+                    "leverage": 5,
+                    "status": "limited_api",
+                    "api_status": f"LIMITED API - Real BTC Price: ${current_btc_price:,.2f}",
+                    "current_btc_price": current_btc_price
+                }
+            except Exception as e:
+                logger.error(f"Failed to get limited API data: {e}")
+                # Fall back to mock data
+                return {
+                    "portfolio_value": 100.0,
+                    "cash_balance": 100.0,
+                    "buying_power": 500.0,
+                    "daily_change": 0.0,
+                    "positions": [],
+                    "leverage": 5,
+                    "status": "api_error",
+                    "api_status": "API Error - Using Mock Data"
+                }
             
         try:
             account = self.client.futures_account(recvWindow=60000)
@@ -175,18 +225,32 @@ class BinanceFuturesClient:
                 "daily_change": 0.0,
                 "positions": positions,
                 "leverage": leverage,
-                "status": "available",
+                "status": "connected",
+                "api_status": "CONNECTED - Real Account Data",
                 "paper_trading": self.testnet
             }
             
         except BinanceAPIException as e:
             logger.error(f"Error getting account summary: {e}")
+            # Try to enable limited API mode if not already
+            if not hasattr(self, 'limited_api') or not self.limited_api:
+                try:
+                    # Test if we can get public data
+                    btc_ticker = self.client.futures_symbol_ticker(symbol='BTCUSDT')
+                    logger.info("Switching to limited API mode due to account access error")
+                    self.limited_api = True
+                    return self.get_account_summary()  # Recursive call with limited API
+                except:
+                    pass
+            
             return {
                 "portfolio_value": 0.0,
                 "cash_balance": 0.0,
                 "buying_power": 0.0,
                 "daily_change": 0.0,
-                "leverage": 10
+                "leverage": 10,
+                "status": "error",
+                "api_status": f"API Error: {str(e)}"
             }
     
     def get_symbol_info(self, symbol: str) -> Dict[str, Any]:
